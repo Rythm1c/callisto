@@ -1,0 +1,38 @@
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    //pub tex_coord: [f32; 2],
+}
+
+pub fn vertex(pos: [f32; 3], norm: [f32; 3] /*  tc: [f32; 2] */) -> Vertex {
+    Vertex {
+        position: [pos[0], pos[1], pos[2]],
+        normal: norm,
+        // tex_coord: tc,
+    }
+}
+
+impl Vertex {
+    pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: (size_of::<f32>() * 3) as wgpu::BufferAddress,
+                    shader_location: 1,
+                },
+            ],
+        }
+    }
+}
