@@ -1,14 +1,22 @@
-use math::mat4::Mat4;
+use math::mat4::{Mat4, translate};
+use math::vec3::{Vec3, vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::renderer::camera::CameraMotion;
 use crate::renderer::gui::GuiManager;
+use crate::renderer::light::DirectionalLight;
+use crate::renderer::uniform::Uniform;
+use crate::renderer::uniform::frame::{FrameData, GpuFrameData};
+use crate::renderer::uniform::material::{GpuMaterialData, MaterialData};
+use crate::renderer::uniform::model::{GpuModelData, ModelData};
 
 use super::camera::{Camera, CameraController};
 use super::pipeline::Pipeline;
 use super::traits::Renderable;
+
+use super::timer::Timer;
 
 /// Central abstraction for rendering glTF assets and other models
 pub struct Viewer {
@@ -27,14 +35,19 @@ pub struct Viewer {
     // Camera system
     camera: Camera,
     camera_controller: CameraController,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
 
-    model_buffer: wgpu::Buffer,
-    model_bind_group: wgpu::BindGroup,
+    //uniforms
+    frame_uniform: Uniform<GpuFrameData>,
+    model_uniform: Uniform<GpuModelData>,
+    material_uniform: Uniform<GpuMaterialData>,
+
+    //lighting
+    sun: DirectionalLight,
 
     // GUI
     gui: GuiManager,
+
+    timer: Timer,
 }
 
 impl Viewer {
@@ -65,38 +78,23 @@ impl Viewer {
         let camera = Camera::new(aspect_ratio);
         let camera_controller = CameraController::new();
 
-        // Create camera buffer
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&camera.view_projection_matrix().data.as_flattened()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let sun = DirectionalLight {
+            direction: vec3(-1.0, -1.0, 1.0),
+            color: [1.0, 1.0, 1.0],
+        };
 
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera bind group"),
-            layout: &pipeline.camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
+        let frame_uniform =
+            Uniform::<GpuFrameData>::new(&device, &pipeline.frame_layout, "frame uniform");
 
-        let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("model uniform buffer"),
-            contents: bytemuck::cast_slice(&Mat4::IDENTITY.data.as_flattened()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let model_uniform =
+            Uniform::<GpuModelData>::new(&device, &pipeline.model_layout, "model uniform");
 
-        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("model bind group"),
-            layout: &pipeline.model_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: model_buffer.as_entire_binding(),
-            }],
-        });
+        let material_uniform =
+            Uniform::<GpuMaterialData>::new(&device, &pipeline.material_layout, "Material uniform");
 
         let gui = GuiManager::new(&device, surface_format, &window);
+
+        let timer = Timer::new();
 
         let viewer = Self {
             window,
@@ -110,12 +108,16 @@ impl Viewer {
 
             camera,
             camera_controller,
-            camera_buffer,
-            camera_bind_group,
-            // last_mouse_pos: (0.0, 0.0),
-            model_buffer,
-            model_bind_group,
+
+            frame_uniform,
+            model_uniform,
+            material_uniform,
+
+            sun,
+
             gui,
+
+            timer,
         };
 
         viewer.configure_surface();
@@ -159,35 +161,22 @@ impl Viewer {
     }
 
     // ==================== Accessors ====================
-    pub fn window(&self) -> &Window {
-        &self.window
-    }
 
     pub fn device(&self) -> &wgpu::Device {
         &self.device
-    }
-
-    pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
     }
 
     pub fn pipeline(&self) -> &Pipeline {
         &self.pipeline
     }
 
-    pub fn camera(&self) -> &Camera {
-        &self.camera
-    }
-
-    pub fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.camera
-    }
-
     // ==================== Input Handling ====================
     pub fn handle_mouse_move(&mut self, delta_x: f32, delta_y: f32) {
-        self.camera_controller
-            .rotate(&mut self.camera, delta_x, delta_y);
-        self.update_camera_buffer();
+        if !self.gui.wants_mouse() {
+            self.camera_controller
+                .rotate(&mut self.camera, delta_x, delta_y);
+            //self.update_camera_buffer();
+        }
     }
 
     pub fn handle_window_event(&mut self, event: &winit::event::WindowEvent) {
@@ -200,46 +189,89 @@ impl Viewer {
             return; // Only handle key press, not release
         }
 
-        match key {
-            winit::keyboard::KeyCode::KeyW => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::Forwards);
-            }
-            winit::keyboard::KeyCode::KeyS => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::BackWards);
-            }
-            winit::keyboard::KeyCode::KeyA => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::Left);
-            }
-            winit::keyboard::KeyCode::KeyD => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::Right);
-            }
-            winit::keyboard::KeyCode::Space => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::Up);
-            }
-            winit::keyboard::KeyCode::ControlLeft | winit::keyboard::KeyCode::ControlRight => {
-                CameraController::set_camera_motion(&mut self.camera, CameraMotion::Down);
-            }
+        if !self.gui.wants_keyboard() {
+            match key {
+                winit::keyboard::KeyCode::KeyW => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Forwards);
+                }
+                winit::keyboard::KeyCode::KeyS => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::BackWards);
+                }
+                winit::keyboard::KeyCode::KeyA => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Left);
+                }
+                winit::keyboard::KeyCode::KeyD => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Right);
+                }
+                winit::keyboard::KeyCode::Space => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Up);
+                }
+                winit::keyboard::KeyCode::ControlLeft | winit::keyboard::KeyCode::ControlRight => {
+                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Down);
+                }
 
-            _ => {}
+                _ => {}
+            }
         }
     }
 
-    fn update_camera_buffer(&mut self) {
+    /* fn update_camera_buffer(&mut self) {
         let view_proj = self.camera.view_projection_matrix();
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&view_proj.data.as_flattened()),
         );
-    }
+    } */
 
-    pub fn update(&mut self, delta: f32) {
+    pub fn update(&mut self) {
+        self.timer.update();
         // update camera data if theres motion detected
         if self.camera.motion != CameraMotion::Still {
             self.camera_controller
-                .update_motion(&mut self.camera, delta);
-            self.update_camera_buffer();
+                .update_motion(&mut self.camera, self.timer.delta);
+            //self.update_camera_buffer();
         }
+
+        let frame_data = FrameData {
+            view_proj: self.camera.view_projection_matrix(),
+            cam_pos: self.camera.pos,
+            sun: self.sun,
+        };
+        self.frame_uniform.write(&self.queue, &frame_data.into());
+
+        let model_data = ModelData {
+            world: translate(&vec3(0.0, 1.0, 5.0)),
+        };
+        self.model_uniform.write(&self.queue, &model_data.into());
+
+        let material_data = MaterialData {
+            base_color: [0.6, 0.6, 0.6, 1.0],
+            specular_color: [0.4, 0.4, 0.4],
+            shininess: 32.0,
+        };
+        self.material_uniform
+            .write(&self.queue, &material_data.into());
+    }
+
+    fn get_ui(&mut self) -> egui::FullOutput {
+        // Begin GUI frame
+        self.gui.begin_frame(&self.window);
+
+        // Build UI
+        egui::Window::new("Callisto viewer")
+            .resizable(true)
+            .show(&self.gui.get_ctx(), |ui| {
+                ui.label("A glTF viewer built with Rust, wgpu, and egui");
+                ui.separator();
+
+                ui.label("Camera Info:");
+                ui.monospace("Look around with mouse drag + movement keys");
+                ui.separator();
+                ui.monospace(format!("fps: {}", self.timer.fps()).as_str());
+            });
+        // End GUI frame
+        self.gui.end_frame()
     }
 
     // ==================== Rendering ====================
@@ -250,21 +282,15 @@ impl Viewer {
 
         self.configure_surface();
         self.depth_texture = Self::create_depth_texture(&self.device, new_size);
-        self.update_camera_buffer();
+        //self.update_camera_buffer();
     }
 
     pub fn render<T>(&mut self, model: &T)
     where
         T: Renderable,
     {
-        // Begin GUI frame
-        self.gui.begin_frame(&self.window);
-
-        // Build UI
-        self.gui.ui();
-
         // End GUI frame
-        let egui_output = self.gui.end_frame();
+        let egui_output = self.get_ui();
 
         let surface_texture = self
             .surface
@@ -309,8 +335,9 @@ impl Viewer {
             });
 
             renderpass.set_pipeline(&self.pipeline.handle);
-            renderpass.set_bind_group(0, &self.camera_bind_group, &[]);
-            renderpass.set_bind_group(1, &self.model_bind_group, &[]);
+            renderpass.set_bind_group(0, &self.frame_uniform.bind_group, &[]);
+            renderpass.set_bind_group(1, &self.model_uniform.bind_group, &[]);
+            renderpass.set_bind_group(2, &self.material_uniform.bind_group, &[]);
 
             model.render(&mut renderpass);
         }
@@ -321,7 +348,7 @@ impl Viewer {
             pixels_per_point: self.window.scale_factor() as f32,
         };
 
-         self.gui.render(
+        self.gui.render(
             &self.device,
             &self.queue,
             &mut encoder,
@@ -333,5 +360,6 @@ impl Viewer {
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
+        self.window.request_redraw();
     }
 }

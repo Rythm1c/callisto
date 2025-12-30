@@ -48,6 +48,18 @@ impl GuiManager {
         self.egui_ctx.begin_pass(raw_input);
     }
 
+    pub fn get_ctx(&self) -> &egui::Context {
+        &self.egui_ctx
+    }
+
+    pub fn wants_mouse(&self) -> bool {
+        self.egui_state.egui_ctx().wants_pointer_input()
+    }
+
+    pub fn wants_keyboard(&self) -> bool {
+        self.egui_state.egui_ctx().wants_keyboard_input()
+    }
+
     /// Define your UI here
     pub fn ui(&self) {
         egui::Window::new("Callisto viewer")

@@ -1,13 +1,14 @@
-use crate::utils::color::ColorRGB;
 use math::vec3::Vec3;
 
-pub struct Light {
-    position: Vec3,
-    color: ColorRGB,
+#[derive(Clone, Copy)]
+pub struct DirectionalLight {
+    pub direction: Vec3,
+
+    pub color: [f32; 3],
 }
 
-impl Light {
-    pub fn new(position: Vec3, color: ColorRGB) -> Self {
-        Self { position, color }
+impl DirectionalLight {
+    pub fn new(direction: Vec3, color: [f32; 3]) -> Self {
+        Self { direction, color }
     }
 }

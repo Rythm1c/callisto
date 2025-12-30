@@ -12,7 +12,7 @@ use crate::{renderer::Viewer, renderer::primitive::Primitive};
 
 struct App {
     viewer: Option<Viewer>,
-    sphere: Option<Primitive>,
+    cube: Option<Primitive>,
     is_mouse_dragging: bool,
     last_mouse_pos: (f64, f64),
 }
@@ -21,7 +21,7 @@ impl App {
     fn new() -> Self {
         Self {
             viewer: None,
-            sphere: None,
+            cube: None,
             is_mouse_dragging: false,
             last_mouse_pos: (0.0, 0.0),
         }
@@ -39,10 +39,10 @@ impl ApplicationHandler for App {
         let viewer = pollster::block_on(Viewer::new(window.clone()));
 
         // Initialize the cube primitive
-        let sphere = Primitive::sphere(viewer.device(), &viewer.pipeline().model_layout);
+        let cube = Primitive::cube(viewer.device(), &viewer.pipeline().model_layout);
 
         self.viewer = Some(viewer);
-        self.sphere = Some(sphere);
+        self.cube = Some(cube);
 
         window.request_redraw();
     }
@@ -66,11 +66,10 @@ impl ApplicationHandler for App {
 
             winit::event::WindowEvent::RedrawRequested => {
                 if let Some(viewer) = self.viewer.as_mut() {
-                    if let Some(sphere) = self.sphere.as_ref() {
-                        viewer.update(0.016);
-                        viewer.render(sphere);
+                    if let Some(cube) = self.cube.as_ref() {
+                        viewer.update();
+                        viewer.render(cube);
                     }
-                    viewer.window().request_redraw();
                 }
             }
 

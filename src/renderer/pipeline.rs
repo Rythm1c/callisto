@@ -1,15 +1,30 @@
 use crate::renderer::vertex::Vertex;
 
 pub struct Pipeline {
-    pub camera_layout: wgpu::BindGroupLayout,
+    pub frame_layout: wgpu::BindGroupLayout,
     pub model_layout: wgpu::BindGroupLayout,
+    pub material_layout: wgpu::BindGroupLayout,
     pub handle: wgpu::RenderPipeline,
 }
 
 impl Pipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::ColorTargetState) -> Self {
-        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Camera Layout"),
+        let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Frame data Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Model data Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
@@ -22,15 +37,15 @@ impl Pipeline {
             }],
         });
 
-        let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Model Layout"),
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Material data Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(64),
+                    min_binding_size: None,
                 },
                 count: None,
             }],
@@ -40,7 +55,7 @@ impl Pipeline {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&camera_layout, &model_layout],
+            bind_group_layouts: &[&frame_layout, &model_layout, &material_layout],
             push_constant_ranges: &[],
         });
 
@@ -78,8 +93,9 @@ impl Pipeline {
         //let vertex_buffer = [];
 
         Self {
-            camera_layout,
+            frame_layout,
             model_layout,
+            material_layout,
             handle: pipeline,
         }
     }
