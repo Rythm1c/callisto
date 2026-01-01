@@ -151,4 +151,12 @@ impl RenderManager {
     pub fn mesh_count(&self) -> usize {
         self.meshes.len()
     }
+
+    pub fn vertex_count(&self) -> usize {
+        self.meshes.iter().map(|mesh| mesh.get_vert_count()).sum()
+    }
+
+    pub fn index_count(&self) -> usize {
+        self.meshes.iter().map(|mesh| mesh.get_index_count()).sum()
+    }
 }

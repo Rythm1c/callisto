@@ -78,7 +78,12 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var result: VertexOutput;
-    result.normal = in.normal;
+
+    // Transform normal by inverse transpose of model matrix (normal matrix)
+    let model_3x3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz);
+    let normal_matrix = transpose(inverse3x3(model_3x3));
+    result.normal = normalize(normal_matrix * in.normal);
+
     result.clip_pos = frame.view_proj * model * vec4<f32>(in.position, 1.0);
     result.world_pos = (model * vec4<f32>(in.position, 1.0)).xyz;
     result.uv = in.uv;
@@ -88,6 +93,29 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 // Helper to check if a texture is present
 fn has_tex(flag: u32) -> bool {
     return flag != 0u;
+}
+
+// Compute the inverse of a 3x3 matrix
+fn inverse3x3(m: mat3x3<f32>) -> mat3x3<f32> {
+    let a00 = m[0][0];
+    let a01 = m[0][1];
+    let a02 = m[0][2];
+    let a10 = m[1][0];
+    let a11 = m[1][1];
+    let a12 = m[1][2];
+    let a20 = m[2][0];
+    let a21 = m[2][1];
+    let a22 = m[2][2];
+
+    let b01 = a22 * a11 - a12 * a21;
+    let b11 = - (a22 * a10 - a12 * a20);
+    let b21 = a21 * a10 - a11 * a20;
+
+    let det = a00 * b01 + a01 * b11 + a02 * b21;
+
+    let inv_det = 1.0 / det;
+
+    return mat3x3<f32>(vec3<f32>(b01 * inv_det, (- (a22 * a01 - a02 * a21)) * inv_det, (a12 * a01 - a02 * a11) * inv_det), vec3<f32>(b11 * inv_det, (a22 * a00 - a02 * a20) * inv_det, (- (a12 * a00 - a02 * a10)) * inv_det), vec3<f32>(b21 * inv_det, (- (a21 * a00 - a01 * a20)) * inv_det, (a11 * a00 - a01 * a10) * inv_det));
 }
 
 // Fresnel Schlick approximation

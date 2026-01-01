@@ -1,4 +1,4 @@
-use math::mat4::{rotation_y, translate, transpose};
+use math::mat4::transpose;
 use math::quaternion::Quat;
 use math::transform::Transform;
 use math::vec3::vec3;
@@ -6,20 +6,26 @@ use std::path::Path;
 use std::sync::Arc;
 use winit::window::Window;
 
-use crate::renderer::camera::CameraMotion;
+use crate::renderer::camera::CameraController;
 use crate::renderer::gui::GuiManager;
 use crate::renderer::light::DirectionalLight;
-use crate::renderer::manager::RenderManager;
-use crate::renderer::model::importer::GltfFile;
+use crate::renderer::pipeline::Pipeline;
+use crate::renderer::scene::Scene;
 use crate::renderer::settings::ViewerSettings;
+use crate::renderer::timer::Timer;
 use crate::renderer::uniform::frame::{FrameBindGroup, FrameData};
 use crate::renderer::uniform::model::{ModelBindGroup, ModelData};
 
-use super::camera::{Camera, CameraController};
-use super::pipeline::Pipeline;
-use super::traits::Renderable;
+/// Rendering state (pipeline, textures, etc.)
+struct RenderState {
+    pipeline: Pipeline,
+    depth_texture: wgpu::TextureView,
+}
 
-use super::timer::Timer;
+/// Camera and input system
+struct CameraSystem {
+    controller: CameraController,
+}
 
 /// Central abstraction for rendering glTF assets and other models
 pub struct Viewer {
@@ -32,27 +38,26 @@ pub struct Viewer {
     surface_format: wgpu::TextureFormat,
 
     // Rendering
-    pipeline: Pipeline,
-    depth_texture: wgpu::TextureView,
+    render_state: RenderState,
 
-    // Camera system
-    camera: Camera,
-    camera_controller: CameraController,
+    // Camera and input
+    camera_system: CameraSystem,
 
-    //uniforms
+    // Uniforms
     frame_bind_group: FrameBindGroup,
     model_bind_group: ModelBindGroup,
 
-    render_manager: RenderManager,
+    // Scene
+    scene: Scene,
 
-    //lighting
+    // Lighting
     sun: DirectionalLight,
 
     // GUI
     gui: GuiManager,
 
+    // Settings and timing
     settings: ViewerSettings,
-
     timer: Timer,
 }
 
@@ -81,28 +86,29 @@ impl Viewer {
         let depth_texture = Self::create_depth_texture(&device, size);
 
         // Initialize camera
-        let camera = Camera::new(aspect_ratio);
-        let camera_controller = CameraController::new();
+        let controller = CameraController::new(aspect_ratio);
 
-        let sun = DirectionalLight {
-            direction: vec3(-1.0, -1.0, -1.0),
-            color: [5.0, 5.0, 5.0],
-        };
+        let sun = DirectionalLight::new(vec3(-1.0, -1.0, 1.0), [5.0, 5.0, 5.0]);
 
         let frame_bind_group =
-            FrameBindGroup::new(&device, &pipeline.frame_layout, "Frame bind Group");
+            FrameBindGroup::new(&device, &pipeline.frame_layout, "Frame Bind Group");
         let model_bind_group =
-            ModelBindGroup::new(&device, &pipeline.model_layout, "Model bind group");
+            ModelBindGroup::new(&device, &pipeline.model_layout, "Model Bind Group");
 
-        let file = &GltfFile::load_gltf(Path::new("models/astronaut")).unwrap();
-
-        let render_manager = RenderManager::new(&device, &pipeline.material_layout, &queue, file);
+        // Load default scene
+        let scene = Scene::load(
+            &device,
+            &pipeline.material_layout,
+            &queue,
+            Path::new("models/alien"),
+        )
+        .expect("Failed to load default scene");
 
         let gui = GuiManager::new(&device, surface_format, &window);
 
         let timer = Timer::new();
 
-        let settings = ViewerSettings::new([0.2, 0.5, 0.3]);
+        let settings = ViewerSettings::new([0.2, 0.3, 0.5]);
 
         let viewer = Self {
             window,
@@ -111,28 +117,33 @@ impl Viewer {
             size,
             surface,
             surface_format,
-            pipeline,
-            depth_texture,
-
-            camera,
-            camera_controller,
-
+            render_state: RenderState {
+                pipeline,
+                depth_texture,
+            },
+            camera_system: CameraSystem { controller },
             sun,
-
             frame_bind_group,
             model_bind_group,
-
-            render_manager,
-
+            scene,
             gui,
-
             settings,
-
             timer,
         };
 
         viewer.configure_surface();
         viewer
+    }
+
+    /// Load a new scene, replacing the current one
+    pub fn load_scene(&mut self, path: &Path) -> Result<(), String> {
+        self.scene = Scene::load(
+            &self.device,
+            &self.render_state.pipeline.material_layout,
+            &self.queue,
+            path,
+        )?;
+        Ok(())
     }
 
     fn create_depth_texture(
@@ -171,22 +182,10 @@ impl Viewer {
         self.surface.configure(&self.device, &surface_config);
     }
 
-    // ==================== Accessors ====================
-
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-
-    pub fn pipeline(&self) -> &Pipeline {
-        &self.pipeline
-    }
-
     // ==================== Input Handling ====================
     pub fn handle_mouse_move(&mut self, delta_x: f32, delta_y: f32) {
         if !self.gui.wants_mouse() {
-            self.camera_controller
-                .rotate(&mut self.camera, delta_x, delta_y);
-            //self.update_camera_buffer();
+            self.camera_system.controller.rotate(delta_x, delta_y);
         }
     }
 
@@ -196,29 +195,29 @@ impl Viewer {
 
     pub fn handle_keyboard(&mut self, key: winit::keyboard::KeyCode, pressed: bool) {
         if !pressed {
-            CameraController::set_camera_motion(&mut self.camera, CameraMotion::Still);
+            self.camera_system.controller.set_motion_still();
             return; // Only handle key press, not release
         }
 
         if !self.gui.wants_keyboard() {
             match key {
                 winit::keyboard::KeyCode::KeyW => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Forwards);
+                    self.camera_system.controller.set_motion_forwards();
                 }
                 winit::keyboard::KeyCode::KeyS => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::BackWards);
+                    self.camera_system.controller.set_motion_backwards();
                 }
                 winit::keyboard::KeyCode::KeyA => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Left);
+                    self.camera_system.controller.set_motion_left();
                 }
                 winit::keyboard::KeyCode::KeyD => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Right);
+                    self.camera_system.controller.set_motion_right();
                 }
                 winit::keyboard::KeyCode::Space => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Up);
+                    self.camera_system.controller.set_motion_up();
                 }
                 winit::keyboard::KeyCode::ControlLeft | winit::keyboard::KeyCode::ControlRight => {
-                    CameraController::set_camera_motion(&mut self.camera, CameraMotion::Down);
+                    self.camera_system.controller.set_motion_down();
                 }
 
                 _ => {}
@@ -228,15 +227,11 @@ impl Viewer {
 
     pub fn update(&mut self) {
         self.timer.update();
-        // update camera data if theres motion detected
-        if self.camera.motion != CameraMotion::Still {
-            self.camera_controller
-                .update_motion(&mut self.camera, self.timer.delta);
-        }
+        self.camera_system.controller.update(self.timer.delta);
 
         let frame_data = FrameData {
-            view_proj: self.camera.view_projection_matrix(),
-            cam_pos: self.camera.pos,
+            view_proj: self.camera_system.controller.view_projection_matrix(),
+            cam_pos: self.camera_system.controller.position(),
             sun: self.sun,
         };
         self.frame_bind_group.write(&self.queue, frame_data);
@@ -254,6 +249,33 @@ impl Viewer {
     fn get_ui(&mut self) -> egui::FullOutput {
         // Begin GUI frame
         self.gui.begin_frame(&self.window);
+
+        egui::Window::new("File Info")
+            .resizable(true)
+            .show(&self.gui.get_ctx(), |ui| {
+                let info = self.scene.get_info();
+
+                ui.monospace(format!("Name: {}", info.name));
+                ui.separator();
+
+                ui.monospace(format!("Mesh count: {}", info.mesh_count));
+                ui.separator();
+
+                ui.monospace(format!("Material count: {}", info.material_count).as_str());
+                ui.separator();
+
+                ui.monospace(format!("Texture count: {}", info.texture_count).as_str());
+                ui.separator();
+
+                ui.monospace(format!("Material count: {}", info.material_count).as_str());
+                ui.separator();
+
+                ui.monospace(format!("Vertex count: {}", info.vert_count).as_str());
+                ui.separator();
+
+                ui.monospace(format!("Index count: {}", info.index_count).as_str());
+                ui.separator();
+            });
 
         // Build UI
         egui::Window::new("Callisto viewer")
@@ -282,17 +304,14 @@ impl Viewer {
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.size = new_size;
         let aspect_ratio = new_size.width as f32 / new_size.height as f32;
-        self.camera.aspect_ratio = aspect_ratio;
+        self.camera_system.controller.set_aspect_ratio(aspect_ratio);
 
         self.configure_surface();
-        self.depth_texture = Self::create_depth_texture(&self.device, new_size);
+        self.render_state.depth_texture = Self::create_depth_texture(&self.device, new_size);
         self.gui.on_window_resized(&self.window);
     }
 
-    pub fn render<F>(&mut self, render_func: F)
-    where
-        F: Fn(&mut wgpu::RenderPass),
-    {
+    pub fn render(&mut self) {
         // End GUI frame
         let egui_output = self.get_ui();
 
@@ -327,7 +346,7 @@ impl Viewer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture,
+                    view: &self.render_state.depth_texture,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -338,13 +357,11 @@ impl Viewer {
                 occlusion_query_set: None,
             });
 
-            renderpass.set_pipeline(&self.pipeline.handle);
+            renderpass.set_pipeline(&self.render_state.pipeline.handle);
             renderpass.set_bind_group(0, &self.frame_bind_group.bind_group, &[]);
             renderpass.set_bind_group(1, &self.model_bind_group.bind_group, &[]);
 
-            self.render_manager.render(&mut renderpass);
-
-            render_func(&mut renderpass);
+            self.scene.render(&mut renderpass);
         }
 
         // Render GUI

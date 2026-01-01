@@ -4,6 +4,7 @@ pub mod light;
 pub mod manager;
 pub mod model;
 pub mod pipeline;
+pub mod scene;
 pub mod settings;
 pub mod timer;
 pub mod traits;

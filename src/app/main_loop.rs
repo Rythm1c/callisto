@@ -8,7 +8,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{renderer::Viewer, renderer::model::primitive::Primitive};
+use crate::renderer::Viewer;
 
 struct App {
     viewer: Option<Viewer>,
@@ -67,9 +67,7 @@ impl ApplicationHandler for App {
             winit::event::WindowEvent::RedrawRequested => {
                 if let Some(viewer) = self.viewer.as_mut() {
                     viewer.update();
-                    viewer.render(|renderpass| {
-                        
-                    });
+                    viewer.render();
                 }
             }
 
