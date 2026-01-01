@@ -48,6 +48,11 @@ impl GuiManager {
         self.egui_ctx.begin_pass(raw_input);
     }
 
+    /// Update scale factor on window resize
+    pub fn on_window_resized(&mut self, window: &Window) {
+        self.egui_ctx.set_pixels_per_point(window.scale_factor() as f32);
+    }
+
     pub fn get_ctx(&self) -> &egui::Context {
         &self.egui_ctx
     }
@@ -58,23 +63,6 @@ impl GuiManager {
 
     pub fn wants_keyboard(&self) -> bool {
         self.egui_state.egui_ctx().wants_keyboard_input()
-    }
-
-    /// Define your UI here
-    pub fn ui(&self) {
-        egui::Window::new("Callisto viewer")
-            .resizable(true)
-            .auto_sized()
-            .show(&self.egui_ctx, |ui| {
-                ui.heading("Callisto Viewer");
-                ui.label("A glTF viewer built with Rust, wgpu, and egui");
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    ui.label("Camera Info:");
-                    ui.monospace("Look around with mouse drag + movement keys");
-                });
-            });
     }
 
     /// End frame and prepare rendering

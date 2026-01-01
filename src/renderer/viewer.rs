@@ -1,16 +1,19 @@
-use math::mat4::{Mat4, translate};
-use math::vec3::{Vec3, vec3};
+use math::mat4::{rotation_y, translate, transpose};
+use math::quaternion::Quat;
+use math::transform::Transform;
+use math::vec3::vec3;
+use std::path::Path;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::renderer::camera::CameraMotion;
 use crate::renderer::gui::GuiManager;
 use crate::renderer::light::DirectionalLight;
-use crate::renderer::uniform::Uniform;
-use crate::renderer::uniform::frame::{FrameData, GpuFrameData};
-use crate::renderer::uniform::material::{GpuMaterialData, MaterialData};
-use crate::renderer::uniform::model::{GpuModelData, ModelData};
+use crate::renderer::manager::RenderManager;
+use crate::renderer::model::importer::GltfFile;
+use crate::renderer::settings::ViewerSettings;
+use crate::renderer::uniform::frame::{FrameBindGroup, FrameData};
+use crate::renderer::uniform::model::{ModelBindGroup, ModelData};
 
 use super::camera::{Camera, CameraController};
 use super::pipeline::Pipeline;
@@ -37,15 +40,18 @@ pub struct Viewer {
     camera_controller: CameraController,
 
     //uniforms
-    frame_uniform: Uniform<GpuFrameData>,
-    model_uniform: Uniform<GpuModelData>,
-    material_uniform: Uniform<GpuMaterialData>,
+    frame_bind_group: FrameBindGroup,
+    model_bind_group: ModelBindGroup,
+
+    render_manager: RenderManager,
 
     //lighting
     sun: DirectionalLight,
 
     // GUI
     gui: GuiManager,
+
+    settings: ViewerSettings,
 
     timer: Timer,
 }
@@ -79,22 +85,24 @@ impl Viewer {
         let camera_controller = CameraController::new();
 
         let sun = DirectionalLight {
-            direction: vec3(-1.0, -1.0, 1.0),
-            color: [1.0, 1.0, 1.0],
+            direction: vec3(-1.0, -1.0, -1.0),
+            color: [5.0, 5.0, 5.0],
         };
 
-        let frame_uniform =
-            Uniform::<GpuFrameData>::new(&device, &pipeline.frame_layout, "frame uniform");
+        let frame_bind_group =
+            FrameBindGroup::new(&device, &pipeline.frame_layout, "Frame bind Group");
+        let model_bind_group =
+            ModelBindGroup::new(&device, &pipeline.model_layout, "Model bind group");
 
-        let model_uniform =
-            Uniform::<GpuModelData>::new(&device, &pipeline.model_layout, "model uniform");
+        let file = &GltfFile::load_gltf(Path::new("models/astronaut")).unwrap();
 
-        let material_uniform =
-            Uniform::<GpuMaterialData>::new(&device, &pipeline.material_layout, "Material uniform");
+        let render_manager = RenderManager::new(&device, &pipeline.material_layout, &queue, file);
 
         let gui = GuiManager::new(&device, surface_format, &window);
 
         let timer = Timer::new();
+
+        let settings = ViewerSettings::new([0.2, 0.5, 0.3]);
 
         let viewer = Self {
             window,
@@ -109,13 +117,16 @@ impl Viewer {
             camera,
             camera_controller,
 
-            frame_uniform,
-            model_uniform,
-            material_uniform,
-
             sun,
 
+            frame_bind_group,
+            model_bind_group,
+
+            render_manager,
+
             gui,
+
+            settings,
 
             timer,
         };
@@ -215,22 +226,12 @@ impl Viewer {
         }
     }
 
-    /* fn update_camera_buffer(&mut self) {
-        let view_proj = self.camera.view_projection_matrix();
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&view_proj.data.as_flattened()),
-        );
-    } */
-
     pub fn update(&mut self) {
         self.timer.update();
         // update camera data if theres motion detected
         if self.camera.motion != CameraMotion::Still {
             self.camera_controller
                 .update_motion(&mut self.camera, self.timer.delta);
-            //self.update_camera_buffer();
         }
 
         let frame_data = FrameData {
@@ -238,20 +239,16 @@ impl Viewer {
             cam_pos: self.camera.pos,
             sun: self.sun,
         };
-        self.frame_uniform.write(&self.queue, &frame_data.into());
+        self.frame_bind_group.write(&self.queue, frame_data);
+
+        let mut world = Transform::DEFAULT;
+        world.orientation = Quat::rotation_y(180.0);
+        world.translation = vec3(0.0, -2.0, 5.0);
 
         let model_data = ModelData {
-            world: translate(&vec3(0.0, 1.0, 5.0)),
+            world: transpose(&world.to_mat()),
         };
-        self.model_uniform.write(&self.queue, &model_data.into());
-
-        let material_data = MaterialData {
-            base_color: [0.6, 0.6, 0.6, 1.0],
-            specular_color: [0.4, 0.4, 0.4],
-            shininess: 32.0,
-        };
-        self.material_uniform
-            .write(&self.queue, &material_data.into());
+        self.model_bind_group.write(&self.queue, model_data);
     }
 
     fn get_ui(&mut self) -> egui::FullOutput {
@@ -265,10 +262,17 @@ impl Viewer {
                 ui.label("A glTF viewer built with Rust, wgpu, and egui");
                 ui.separator();
 
+                ui.monospace(format!("fps: {}", self.timer.fps()).as_str());
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("background color: ");
+                    ui.color_edit_button_rgb(&mut self.settings.backgorund_color)
+                });
+                ui.separator();
+
                 ui.label("Camera Info:");
                 ui.monospace("Look around with mouse drag + movement keys");
-                ui.separator();
-                ui.monospace(format!("fps: {}", self.timer.fps()).as_str());
             });
         // End GUI frame
         self.gui.end_frame()
@@ -282,12 +286,12 @@ impl Viewer {
 
         self.configure_surface();
         self.depth_texture = Self::create_depth_texture(&self.device, new_size);
-        //self.update_camera_buffer();
+        self.gui.on_window_resized(&self.window);
     }
 
-    pub fn render<T>(&mut self, model: &T)
+    pub fn render<F>(&mut self, render_func: F)
     where
-        T: Renderable,
+        F: Fn(&mut wgpu::RenderPass),
     {
         // End GUI frame
         let egui_output = self.get_ui();
@@ -314,9 +318,9 @@ impl Viewer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.2,
-                            g: 0.5,
-                            b: 0.3,
+                            r: self.settings.backgorund_color[0] as f64,
+                            g: self.settings.backgorund_color[1] as f64,
+                            b: self.settings.backgorund_color[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -335,11 +339,12 @@ impl Viewer {
             });
 
             renderpass.set_pipeline(&self.pipeline.handle);
-            renderpass.set_bind_group(0, &self.frame_uniform.bind_group, &[]);
-            renderpass.set_bind_group(1, &self.model_uniform.bind_group, &[]);
-            renderpass.set_bind_group(2, &self.material_uniform.bind_group, &[]);
+            renderpass.set_bind_group(0, &self.frame_bind_group.bind_group, &[]);
+            renderpass.set_bind_group(1, &self.model_bind_group.bind_group, &[]);
 
-            model.render(&mut renderpass);
+            self.render_manager.render(&mut renderpass);
+
+            render_func(&mut renderpass);
         }
 
         // Render GUI

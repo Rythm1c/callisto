@@ -1,11 +1,8 @@
-use bytemuck::{Pod, Zeroable};
-
 pub mod frame;
-pub mod light;
 pub mod material;
 pub mod model;
 
-pub struct Uniform<T: Zeroable + Pod> {
+/* pub struct Uniform<T: Zeroable + Pod> {
     pub buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     _marker: std::marker::PhantomData<T>,
@@ -41,3 +38,4 @@ impl<T: Zeroable + Pod> Uniform<T> {
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(data));
     }
 }
+ */
