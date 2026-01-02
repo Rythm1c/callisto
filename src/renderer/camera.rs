@@ -48,8 +48,8 @@ impl CameraController {
             near: 0.1,
             far: 100.0,
             motion: CameraMotion::Still,
-            sensitivity: 0.05,
-            speed: 10.0,
+            sensitivity: 0.075,
+            speed: 15.0,
         }
     }
 

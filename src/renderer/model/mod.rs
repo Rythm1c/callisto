@@ -1,5 +1,8 @@
 pub mod importer;
 pub mod material;
 pub mod mesh;
+pub mod node;
 pub mod primitive;
+pub mod scene;
+pub mod skin;
 pub mod texture;

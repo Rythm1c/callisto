@@ -1,5 +1,5 @@
+use std::error::Error;
 use std::fs;
-use std::io::Error;
 use std::path::Path;
 
 pub struct GltfFile {
@@ -11,24 +11,42 @@ pub struct GltfFile {
 }
 
 impl GltfFile {
-    pub fn load_gltf(folder: &Path) -> Result<GltfFile, Error> {
-        let paths = fs::read_dir(folder).unwrap();
+    pub fn load_gltf(folder: &Path) -> Result<GltfFile, Box<dyn Error>> {
+        if !folder.is_dir() {
+            panic!("Provided path is not a directory");
+        }
 
-        let mut gltf_file = String::new();
-        for entry in paths {
-            let path = entry.unwrap().path();
+        let mut gltf_path = None;
 
-            if let Some(extension) = path.extension() {
-                if extension.eq("gltf") || extension.eq("glb") {
-                    gltf_file = String::from(path.to_str().unwrap());
+        for entry in fs::read_dir(folder)? {
+            let path = entry?.path();
+
+            if let Some(ext) = path.extension() {
+                if ext.eq("gltf") || ext.eq("glb") {
+                    gltf_path = Some(path);
                 }
             }
         }
 
-        let folder = String::from(folder.to_str().unwrap());
+        let gltf_path = gltf_path.ok_or_else(|| {
+            panic!("No .gltf or .glb file found in the folder");
+        })?;
 
-        let (document, buffers, ..) = gltf::import(gltf_file.clone())
-            .expect(format!("Failed to import gltf from {}", gltf_file).as_str());
+        let folder = gltf_path
+            .parent()
+            .unwrap_or(folder)
+            .to_string_lossy()
+            .to_string();
+
+        let (document, buffers, ..) = match gltf_path.extension().unwrap().to_str().unwrap() {
+            "glb" => {
+                let data = fs::read(&gltf_path)?;
+                gltf::import_slice(&data)?
+            }
+            "gltf" => gltf::import(gltf_path)?,
+
+            _ => unreachable!(),
+        };
 
         Ok(GltfFile {
             folder,

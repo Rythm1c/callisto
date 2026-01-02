@@ -79,10 +79,10 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var result: VertexOutput;
 
-    // Transform normal by inverse transpose of model matrix (normal matrix)
-    let model_3x3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz);
-    let normal_matrix = transpose(inverse3x3(model_3x3));
-    result.normal = normalize(normal_matrix * in.normal);
+    //Transform normal by inverse transpose of model matrix (normal matrix)
+    //let model_3x3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz);
+    //let normal_matrix = transpose(inverse3x3(model_3x3));
+    result.normal = normalize(model * vec4<f32>(in.normal, 0.0)).xyz;
 
     result.clip_pos = frame.view_proj * model * vec4<f32>(in.position, 1.0);
     result.world_pos = (model * vec4<f32>(in.position, 1.0)).xyz;

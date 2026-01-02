@@ -50,8 +50,8 @@ use crate::renderer::model::material::TextureFlags;
 #[derive(Clone)]
 pub struct PbrMaterial {
     pub bind_group: wgpu::BindGroup,
-    pub material_buffer: wgpu::Buffer,
-    pub tex_flags_buffer: wgpu::Buffer,
+    material_buffer: wgpu::Buffer,
+    tex_flags_buffer: wgpu::Buffer,
 }
 
 impl PbrMaterial {
@@ -70,7 +70,9 @@ impl PbrMaterial {
         });
         let tex_flags_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("TextureFlags Buffer"),
-            contents: bytemuck::bytes_of(&GpuTextureFlags::from(&material_data.get_texture_flags())),
+            contents: bytemuck::bytes_of(&GpuTextureFlags::from(
+                &material_data.get_texture_flags(),
+            )),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 

@@ -100,7 +100,7 @@ impl Viewer {
             &device,
             &pipeline.material_layout,
             &queue,
-            Path::new("models/alien"),
+            Path::new("models/astronaut"),
         )
         .expect("Failed to load default scene");
 
@@ -284,17 +284,34 @@ impl Viewer {
                 ui.label("A glTF viewer built with Rust, wgpu, and egui");
                 ui.separator();
 
-                ui.monospace(format!("fps: {}", self.timer.fps()).as_str());
-                ui.separator();
-
+                //fps display
                 ui.horizontal(|ui| {
-                    ui.label("background color: ");
-                    ui.color_edit_button_rgb(&mut self.settings.backgorund_color)
+                    ui.monospace("fps :");
+                    ui.monospace(
+                        egui::RichText::new(format!("{:.2}", self.timer.fps()).as_str())
+                            .color(egui::Color32::YELLOW),
+                    );
                 });
                 ui.separator();
 
+                /* ui.horizontal(|ui| {
+                    ui.label("background color: ");
+                    ui.color_edit_button_rgb(&mut self.settings.backgorund_color)
+                });
+                ui.separator(); */
+
                 ui.label("Camera Info:");
                 ui.monospace("Look around with mouse drag + movement keys");
+                ui.horizontal(|ui| {
+                    ui.monospace("Camera pos: ");
+                    let pos = self.camera_system.controller.position();
+                    ui.monospace(
+                        egui::RichText::new(
+                            format!("{:.2}, {:.2}, {:.2}", pos.x, pos.y, pos.z).as_str(),
+                        )
+                        .color(egui::Color32::YELLOW),
+                    );
+                });
             });
         // End GUI frame
         self.gui.end_frame()
