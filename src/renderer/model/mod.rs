@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod importer;
 pub mod material;
 pub mod mesh;

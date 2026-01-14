@@ -10,6 +10,7 @@ egui-winit = "0.33.2"
 wgpu = "27.0.1"
 winit = "0.30.12"
 math = { path = "math" }
+animation = { path = "animation" }
 env_logger = "0.11.8"
 log = "0.4.29"
 pollster = "0.4.0"

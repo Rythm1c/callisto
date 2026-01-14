@@ -239,6 +239,7 @@ impl Viewer {
         let mut world = Transform::DEFAULT;
         world.orientation = Quat::rotation_y(180.0);
         world.translation = vec3(0.0, -2.0, 5.0);
+        world.scaling = vec3(0.5, 0.5, 0.5);
 
         let model_data = ModelData {
             world: transpose(&world.to_mat()),

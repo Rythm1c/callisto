@@ -1,6 +1,8 @@
 use crate::renderer::model::importer::GltfFile;
 use crate::renderer::model::material::Material;
 use crate::renderer::model::mesh::Mesh;
+use crate::renderer::model::node::Node;
+use crate::renderer::model::skin::Skin;
 use crate::renderer::model::texture::Texture;
 use crate::renderer::traits::Renderable;
 use crate::renderer::uniform::material::PbrMaterial;
@@ -28,6 +30,9 @@ pub struct RenderManager {
     meshes: Vec<Mesh>,
     textures: Vec<Texture>,
     materials: Vec<PbrMaterial>,
+    nodes: Vec<Node>,
+    skins: Vec<Skin>,
+    //animations:Vec<>,
     default_material: PbrMaterial,
     fallbacks: FallbackTextures,
 }
@@ -74,10 +79,24 @@ impl RenderManager {
             &fallbacks,
         );
 
+        let nodes = file
+            .get_document()
+            .nodes()
+            .map(|node| Node::from_gltf(&node))
+            .collect();
+
+        let skins = file
+            .get_document()
+            .skins()
+            .map(|skin| Skin::from_gltf(&skin, file))
+            .collect();
+
         Self {
             meshes,
             textures,
             materials,
+            nodes,
+            skins,
             default_material,
             fallbacks,
         }
